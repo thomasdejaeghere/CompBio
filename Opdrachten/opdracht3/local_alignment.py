@@ -1,29 +1,125 @@
-from ctypes import Array
 from pathlib import Path
+
 import numpy as np
-from Bio.Align import substitution_matrices
+import numpy.typing as npt
+from Bio.Align.substitution_matrices import Array, load
+from Bio.SeqIO import parse
+from numba import njit, prange
 
-def local_alignment_score(file: str) -> np.uint8:
-    blosum62: np.ndarray | list[str] = substitution_matrices.load("PAM250")
-    score = blosum62["M","A"]
-    print(score)
-    return np.uint8(0)
+blosum62: Array = load("PAM250")  # type: ignore
+alphabet: list[str] = list(str(blosum62.alphabet))
+parallelize: bool = False
 
-def local_alignment(file: str) -> tuple[str, str]:
-    return '', ''
+sigma: np.uint8 = np.uint8(5)
 
-def multiple_local_alignment(infile: str | Path, output: str | Path | None = None, **kwargs) -> list[list[int]] | None:
-    """
-    Perform multiple local alignments on the input file and optionally write the resulting matrix to an output file.
+
+def read_fasta_file(file_path: str | Path) -> npt.NDArray[np.int32]:
+    return np.array(
+        [
+            convert_keys_to_indices(str(record.seq))
+            for record in parse(file_path, "fasta")
+        ],
+        dtype=object,
+    )
+
+
+def convert_keys_to_indices(sequence: str) -> npt.NDArray[np.int32]:
+    indices: npt.NDArray[np.int32] = np.array(
+        [alphabet.index(char) for char in sequence], dtype=np.int32
+    )
+    return indices
+
+
+@njit(parallel=parallelize)
+def local_alignment_score_matrix(
+    seq1: npt.NDArray[np.int32], seq2: npt.NDArray[np.int32]
+) -> tuple[npt.NDArray[np.int64], np.int64]:
+    len_seq1: int = seq1.size
+    len_seq2: int = seq2.size
+    score_matrix: npt.NDArray[np.int64] = np.zeros(
+        (len_seq1 + 1, len_seq2 + 1), dtype=np.int64
+    )
+
+    for i in prange(1, len_seq1 + 1):
+        for j in range(1, len_seq2 + 1):
+            match: int = (
+                score_matrix[i - 1, j - 1] + blosum62[seq1[i - 1], seq2[j - 1]]  # type: ignore
+            )
+            delete: int = score_matrix[i - 1, j] - sigma
+            insert: int = score_matrix[i, j - 1] - sigma
+            score_matrix[i, j] = max(match, delete, insert, 0)
+
+    max_score: np.int64 = np.max(score_matrix)
+
+    return score_matrix, max_score
+
+
+def local_alignment_score(file_path: str) -> int:
+    sequences: npt.NDArray[np.int32] = read_fasta_file(file_path)
+    max_score: np.int64
+    _, max_score = local_alignment_score_matrix(sequences[0], sequences[1])
+    return int(max_score)
+
+
+def local_alignment(file_path: str) -> tuple[str, str]:
+    sequences: npt.NDArray[np.int32] = read_fasta_file(file_path)
+    seq1: npt.NDArray[np.int32] = sequences[0]
+    seq2: npt.NDArray[np.int32] = sequences[1]
+    score_matrix: npt.NDArray[np.int64]
+    max_score: np.int64
+    score_matrix, max_score = local_alignment_score_matrix(seq1, seq2)
+    indices: tuple[npt.NDArray[np.intp], ...]
+    i: np.intp
+    j: np.intp
+    indices = np.where(score_matrix == max_score)
+    i, j = indices[0][0], indices[1][0]
+
+    align1: npt.NDArray[np.str_] = np.array([], dtype=np.str_)
+    align2: npt.NDArray[np.str_] = np.array([], dtype=np.str_)
+    while i > 0 and j > 0 and score_matrix[i, j] > 0:
+        if (
+            score_matrix[i, j]
+            == score_matrix[i - 1, j - 1] + blosum62[seq1[i - 1], seq2[j - 1]]  # type: ignore
+        ):
+            align1 = np.insert(align1, 0, seq1[i - 1])
+            align2 = np.insert(align2, 0, seq2[j - 1])
+            i, j = i - 1, j - 1
+        elif score_matrix[i, j] == score_matrix[i - 1, j] - sigma:
+            align1 = np.insert(align1, 0, seq1[i - 1])
+            align2 = np.insert(align2, 0, "-")
+            i -= 1
+        else:
+            align1 = np.insert(align1, 0, "-")
+            align2 = np.insert(align2, 0, seq2[j - 1])
+            j -= 1
+
+    return ("".join(align1), "".join(align2))
+
+
+def calculate_scores(sequences: npt.NDArray[np.int32]) -> npt.NDArray[np.int64]:
+    amount_seq = sequences.size
+    scores = np.zeros((amount_seq, amount_seq), dtype=np.int64)
+    for i in prange(amount_seq):
+        for j in prange(i + 1, amount_seq):
+            _, score = local_alignment_score_matrix(sequences[i], sequences[j])
+            scores[i, j] = score
+            scores[j, i] = score
+    return scores
+
+
+def multiple_local_alignment(
+    infile: str | Path, output: str | Path | None = None, **kwargs
+) -> list[list[int]] | None:
+    """Perform multiple local alignments on a set of sequences and optionally save the resulting score matrix.
     Args:
-        infile (str | Path): Path to the input file containing sequence data.
-        output (str | Path | None, optional): Path to the output file where the resulting matrix will be written. 
-            Defaults to None.
-        **kwargs: Additional keyword arguments for customization.
+        infile: Path to the input FASTA file containing sequences.
+        output: Path to save the resulting score matrix. If None, the matrix is returned as a list of lists. Defaults to None.
+        **kwargs: Additional keyword arguments for formatting the output file. Supported keys:
+            - fmt: Format string for saving the scores (default: "%d").
+            - delimiter: Delimiter for separating values in the output file (default: " ").
+            - header: Header line for the output file (default: "").
     Returns:
-        list[list[int]] | None: A 2D list representing the alignment matrix if no output file is specified, 
-        otherwise None.
-
+        list[list[int]] | None: If `output` is None, returns the score matrix as a list of lists. Otherwise, saves the matrix to the specified file and returns None.
     Examples:
         >>> len(multiple_local_alignment('data_10.fna'))
         10
@@ -45,8 +141,30 @@ def multiple_local_alignment(infile: str | Path, output: str | Path | None = Non
         281 197 181 166 124 252 166 152 193 0
         <BLANKLINE>
     """
-    pass
+    sequences: npt.NDArray[np.int32] = read_fasta_file(infile)
+    global parallelize
+
+    if sequences.size > 10:
+        parallelize = True
+
+    scores: npt.NDArray[np.int64] = calculate_scores(sequences)
+
+    parallelize = False
+
+    if output:
+        np.savetxt(
+            output,
+            scores,
+            fmt=kwargs.get("fmt", "%d"),
+            delimiter=kwargs.get("delimiter", " "),
+            header=kwargs.get("header", ""),
+        )
+        return None
+    return scores.tolist()
+
 
 if __name__ == "__main__":
-    local_alignment_score('test')
-    
+    #import doctest
+
+    #doctest.testmod()
+    multiple_local_alignment("data70.fna", 'matrix.txt')
