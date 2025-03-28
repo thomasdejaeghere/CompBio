@@ -55,6 +55,7 @@ def jit_decorator(func):
 
 
 pam250: Array = load("PAM250")  # type: ignore
+pam250_data: npt.NDArray[np.int32] = np.array(pam250, dtype=np.int32)
 alphabet: list[str] = list(str(pam250.alphabet))
 
 sigma: np.uint8 = np.uint8(5)
@@ -143,7 +144,7 @@ def local_alignment_score_matrix(
     for i in range(1, len_seq1 + 1):
         for j in range(1, len_seq2 + 1):
             match: int = (
-                score_matrix[i - 1, j - 1] + pam250[seq1[i - 1], seq2[j - 1]]  # type: ignore
+                score_matrix[i - 1, j - 1] + pam250_data[seq1[i - 1], seq2[j - 1]]  # type: ignore
             )
             delete: int = score_matrix[i - 1, j] - sigma
             insert: int = score_matrix[i, j - 1] - sigma
@@ -206,7 +207,7 @@ def local_alignment(file_path: str) -> tuple[str, str]:
     while i > 0 and j > 0 and score_matrix[i, j] > 0:
         if (
             score_matrix[i, j]
-            == score_matrix[i - 1, j - 1] + pam250[seq1[i - 1], seq2[j - 1]]  # type: ignore
+            == score_matrix[i - 1, j - 1] + pam250_data[seq1[i - 1], seq2[j - 1]]  # type: ignore
         ):
             align1 = np.insert(align1, 0, alphabet[seq1[i - 1]])
             align2 = np.insert(align2, 0, alphabet[seq2[j - 1]])
@@ -317,7 +318,7 @@ def multiple_local_alignment(
 
 
 if __name__ == "__main__":
-    import doctest
+    # import doctest
 
-    doctest.testmod()
-    multiple_local_alignment("data70.fna", "matrix.txt")
+    # doctest.testmod()
+    multiple_local_alignment("data70.fna")
