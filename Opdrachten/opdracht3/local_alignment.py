@@ -1,3 +1,36 @@
+"""This module implements local sequence alignment using the Smith-Waterman algorithm.
+
+It provides functionality to compute alignment scores, perform traceback to find optimal alignments, and handle multiple sequences for pairwise alignment.
+The module is designed to work with sequences in FASTA format and uses the PAM250 substitution matrix for scoring.
+
+As optimizations for this module I used numpy arrays instead of lists to store the motifs and the DNA sequences.
+This allows for more efficient operations on the data, as numpy arrays are optimized for numerical operations.
+I also initialized parallelization using the numba package. I used Just-in-Time Compilation (jit decorator) for the local_alignment_score_matrix
+
+Functions:
+    read_fasta_file(file_path: str | Path) -> npt.NDArray[np.int32]:
+        Reads a FASTA file and converts sequences into a NumPy array of integer indices based on a predefined alphabet.
+
+    convert_keys_to_indices(sequence: str) -> npt.NDArray[np.int32]:
+        Converts a sequence of characters into their corresponding indices using the alphabet derived from the PAM250 matrix.
+
+    local_alignment_score_matrix(seq1: npt.NDArray[np.int32], seq2: npt.NDArray[np.int32]) -> tuple[npt.NDArray[np.int64], np.int64]:
+        Computes the local alignment score matrix for two sequences using the Smith-Waterman algorithm and returns the score matrix and maximum alignment score.
+
+    local_alignment_score(file_path: str) -> int:
+        Reads two sequences from a FASTA file, computes their local alignment score matrix, and returns the maximum score.
+
+    local_alignment(file_path: str) -> tuple[str, str]:
+        Performs local sequence alignment by computing the score matrix and tracing back to find the optimal alignment. Returns the aligned sequences as strings.
+
+    calculate_scores(sequences: npt.NDArray[np.int32]) -> npt.NDArray[np.int64]:
+        Computes a symmetric matrix of pairwise local alignment scores for a set of sequences.
+
+    multiple_local_alignment(infile: str | Path, output: str | Path | None = None, **kwargs) -> list[list[int]] | None:
+        Performs pairwise local alignments for multiple sequences in a FASTA file and optionally saves the resulting score matrix to a file.
+
+"""
+
 from pathlib import Path
 
 import numpy as np
@@ -17,7 +50,7 @@ except ImportError:
 
 def jit_decorator(func):
     if numba_imported:
-        return jit(func)
+        return jit(parallel=True)(func)
     return func
 
 
@@ -148,7 +181,7 @@ def local_alignment(file_path: str) -> tuple[str, str]:
 
     Args:
         file_path: The path to the FASTA file containing two sequences.
-        
+
     Returns:
         A tuple containing the two aligned sequences as strings.
 
@@ -194,17 +227,17 @@ def calculate_scores(sequences: npt.NDArray[np.int32]) -> npt.NDArray[np.int64]:
     """Calculate pairwise local alignment scores for a set of sequences.
     This function computes a symmetric matrix of local alignment scores
     for all pairs of sequences provided in the input array. The local
-    alignment score for each pair is calculated using the 
+    alignment score for each pair is calculated using the
     `local_alignment_score_matrix` function.
 
     Args:
         sequences: A 1D array of sequences represented as integers.
 
     Returns:
-        A 2D symmetric array where the element at position (i, j) 
-        represents the local alignment score between sequences[i] 
+        A 2D symmetric array where the element at position (i, j)
+        represents the local alignment score between sequences[i]
         and sequences[j].
-    
+
     Example:
     >>> sequences = read_fasta_file('data_10.fna')
     >>> calculate_scores(sequences)
@@ -226,7 +259,7 @@ def calculate_scores(sequences: npt.NDArray[np.int32]) -> npt.NDArray[np.int64]:
             _, score = local_alignment_score_matrix(sequences[i], sequences[j])
             scores[i, j] = score
             scores[j, i] = score
-    
+
     return scores
 
 
@@ -287,3 +320,4 @@ if __name__ == "__main__":
     import doctest
 
     doctest.testmod()
+    multiple_local_alignment("data70.fna", "matrix.txt")
