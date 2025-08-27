@@ -48,7 +48,18 @@ except ImportError:
     numba_imported = False
 
 
-def jit_decorator(func):
+def _jit_decorator(func):
+    """Private function: Decorator that applies Numba's JIT compilation with parallelization to the given function if Numba is available.
+
+    If the global variable `numba_imported` is True, the function is decorated with `jit(parallel=True)`.
+    Otherwise, the function is returned unchanged.
+
+    Args:
+        func: The function to potentially decorate.
+
+    Returns:
+        callable: The JIT-decorated function if Numba is imported, otherwise the original function.
+    """
     if numba_imported:
         return jit(parallel=True)(func)
     return func
@@ -102,7 +113,7 @@ def convert_keys_to_indices(sequence: str) -> npt.NDArray[np.int32]:
     return indices
 
 
-@jit_decorator
+@_jit_decorator
 def local_alignment_score_matrix(
     seq1: npt.NDArray[np.int32], seq2: npt.NDArray[np.int32]
 ) -> tuple[npt.NDArray[np.int64], np.int64]:
@@ -318,7 +329,7 @@ def multiple_local_alignment(
 
 
 if __name__ == "__main__":
-    # import doctest
+    import doctest
 
-    # doctest.testmod()
+    doctest.testmod()
     multiple_local_alignment("data70.fna")

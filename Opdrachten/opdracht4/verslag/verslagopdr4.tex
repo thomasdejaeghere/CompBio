@@ -1,0 +1,104 @@
+\documentclass[12pt,a4paper,faculty=we,language=nl,doctype=article]{ugent-doc}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[]{graphicx}
+\usepackage[dutch]{babel}
+\usepackage{float}
+\usepackage[most]{tcolorbox}
+\usepackage{lipsum} % for placeholder text
+\usepackage[colorlinks=true,citecolor=ugentblue, urlcolor=ugentblue]{hyperref}
+\usepackage[backend=biber,style=numeric, sorting=anyt]{biblatex}
+\addbibresource{references.bib}
+\graphicspath{{./figures/}}
+\usepackage{csquotes}
+\usepackage[parfill]{parskip} 
+\usepackage{ulem}
+\renewcommand{\ULthickness}{2pt}
+\usepackage{libertine}
+\usepackage{lmodern}
+\usepackage{titlesec}
+
+\titlespacing{\section}{0pt}{1.8ex plus 0.2ex minus 0.2ex}{1ex}
+\titlespacing{\subsection}{0pt}{0.8ex plus 0.1ex minus 0.1ex}{0.8ex}
+
+
+\thetitle{\uline{\color{ugentblue}Optimalisatie van het ClassiCOL algoritme}}
+
+% The first (top) infobox at bottom of titlepage
+\infoboxa{\bfseries\large Vak: Computationele Biologie}
+
+% The second infobox at bottom of titlepage
+\infoboxb{Lesgevers: 
+	\begin{tabular}[t]{l}
+		Prof.\ Dr.\ Peter Dawyndt\\ % note syntax 'short space'
+		Simon Van de Vyver\\
+		Benjamin Rombaut
+	\end{tabular}
+}
+
+% The third infobox at bottom of titlepage
+\infoboxc{Student: 
+	\begin{tabular}[t]{lll}
+		Thomas Dejaeghere & 02107294 & thomas.dejaeghere@ugent.be\\
+	\end{tabular}
+}
+
+% The last (bottom) infobox at bottom of titlepage
+\infoboxd{Academisch jaar: 2024--2025} % note dash, not hyphen
+
+\begin{document}
+	\maketitle
+	\renewcommand{\ULthickness}{1pt}
+	\begin{tcolorbox}[
+		colback=white,
+		colframe=cyan!70!black,
+		boxrule=0.8pt,
+		arc=3mm,
+		title=\textbf{Abstract},
+		fonttitle=\bfseries,
+		coltitle=black,
+		enhanced
+		]
+		\textbf{Achtergrond:}
+		
+		\textbf{Resultaten:}
+		
+		\textbf{Conclusies:} 
+		
+	\end{tcolorbox}
+	
+	\section{Introductie}
+	
+	\section{Methoden}
+	
+	
+	\section{Resultaten}
+	\begin{tcolorbox}[
+		colback=white,
+		colframe=cyan!70!black,
+		boxrule=0.8pt,
+		arc=3mm,
+		title=\textbf{PC-specificaties},
+		fonttitle=\bfseries,
+		coltitle=black,
+		enhanced
+		]
+		De benchmarks werden uitgevoerd op de volgende machine:
+		
+		\begin{itemize}
+			\item \textbf{Model}: Lenovo Yoga Pro 7
+			\item \textbf{Processor:} 13\textsuperscript{th} Gen Intel\textsuperscript{\textregistered} Core\textsuperscript{TM} i7-13700H @ 2.40 GHz (14 cores)
+			\item \textbf{Geheugen (RAM):} 32,0 GB geïnstalleerd (29,7 GB bruikbaar)
+			\item \textbf{Besturingssysteem:} Windows 11 Pro (64-bit)
+		\end{itemize}
+		
+	\end{tcolorbox}
+	
+	
+	\section{Conclusie}
+	
+	\section*{Appendix A}
+
+	\nocite{openai2024chatgpt}
+	\printbibliography
+\end{document}

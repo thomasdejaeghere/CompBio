@@ -28,28 +28,31 @@ def gibbs_sampler(
     k: int,
     fasta_file: str,
     N: int,
-    rng: int | None = None,
+    rng: int | np.random.Generator | None = None,
     pseudocounts: bool = True,
     starts: int = 20,
 ) -> tuple[str, ...]:
     """Perform Gibbs sampling to find the best scoring motifs in a collection of DNA sequences.
 
     Args:
-        k (int): Length of the k-mers to find.
-        fasta_file (str): Path to the FASTA file containing DNA sequences.
-        N (int): Number of iterations for Gibbs sampling.
-        rng (int | None): Random seed.
-        pseudocounts (bool): Whether to use pseudocounts in the profile matrix.
-        starts (int): Number of random restarts.
+        k: Length of the k-mers to find.
+        fasta_file: Path to the FASTA file containing DNA sequences.
+        N: Number of iterations for Gibbs sampling.
+        rng: Random seed.
+        pseudocounts: Whether to use pseudocounts in the profile matrix.
+        starts: Number of random restarts.
 
     Returns:
-        tuple[str, ...]: Best k-mers found in each sequence.
+        tuple: Best k-mers found in each sequence.
 
     Example:
         >>> gibbs_sampler(3, "data/data01.fna", 100, rng=42, starts=5)
         ('CGG', 'CAG', 'CAG', 'CAG', 'CAG')
     """
-    random_generator: np.random.Generator = np.random.default_rng(rng)
+    if isinstance(rng, np.random.Generator):
+        random_generator = rng
+    else:
+        random_generator: np.random.Generator = np.random.default_rng(rng)
     dna_sequences: npt.NDArray[np.str_] = np.array(
         [str(record.seq) for record in SeqIO.parse(fasta_file, "fasta")]
     )
@@ -63,7 +66,7 @@ def gibbs_sampler(
             [random_kmer(seq, k, random_generator) for seq in dna_sequences]
         )
         for _ in range(N):
-            i: int = random_generator.integers(0, t - 1)
+            i: int = int(random_generator.integers(0, t - 1))
             profile: npt.NDArray[np.float64] = build_profile(
                 np.concatenate((motifs[:i], motifs[i + 1 :])), k, pseudocounts
             )
@@ -80,18 +83,18 @@ def random_kmer(sequence: str, k: int, random_generator: np.random.Generator) ->
     """Select a random k-mer from a given DNA sequence.
 
     Args:
-        sequence (str): DNA sequence.
-        k (int): Length of the k-mer
-        random_generator (np.random.Generator): Random number generator.
+        sequence: DNA sequence.
+        k: Length of the k-mer
+        random_generator: Random number generator.
 
     Returns:
-        str: Random k-mer from the sequence.
+        Random k-mer from the sequence.
 
     Example:
         >>> random_kmer("ACGTACGT", 3, np.random.default_rng(42))
         'ACG'
     """
-    start: int = random_generator.integers(0, len(sequence) - k)
+    start: int = int(random_generator.integers(0, len(sequence) - k))
     return sequence[start : start + k]
 
 
@@ -102,12 +105,12 @@ def build_profile(
     Build a profile matrix with or without pseudocounts.
 
     Args:
-        motifs (np.ndarray): Array of motifs.
-        k (int): Length of the motifs.
-        pseudocounts (bool): Whether to use pseudocounts in the profile matrix.
+        motifs: Array of motifs.
+        k: Length of the motifs.
+        pseudocounts: Whether to use pseudocounts in the profile matrix.
 
     Returns:
-        np.ndarray: Profile matrix.
+        Profile matrix.
 
     Example:
         >>> build_profile(np.array(["ATG", "AAG", "TTG"]), 3, pseudocounts=True)
@@ -135,13 +138,13 @@ def profile_random_kmer(
     """Select a k-mer from a sequence based on the given profile matrix.
 
     Args:
-        sequence (str): DNA sequence.
-        k (int): Length of the k-mer.
-        profile (np.ndarray): Profile matrix.
-        random_generator (np.random.Generator): Random number generator.
+        sequence: DNA sequence.
+        k: Length of the k-mer.
+        profile: Profile matrix.
+        random_generator: Random number generator.
 
     Returns:
-        str: K-mer selected from the sequence based on the profile matrix.
+        K-mer selected from the sequence based on the profile matrix.
 
     Example:
         >>> profile = np.array([[0.2, 0.3, 0.5], [0.3, 0.3, 0.2], [0.3, 0.2, 0.2], [0.2, 0.2, 0.1]])
@@ -167,12 +170,12 @@ def score(motifs: npt.NDArray[np.str_], k: int, t: int) -> np.uint8:
     """Calculate the score of a set of motifs based on consensus deviation.
 
     Args:
-        motifs (np.ndarray): Array of motifs.
-        k (int): Length of the motifs.
-        t (int): Number of motifs.
+        motifs: Array of motifs.
+        k: Length of the motifs.
+        t: Number of motifs.
 
     Returns:
-        int: Score of the motifs.
+        Score of the motifs.
 
     Example:
         >>> int(score(np.array(["ATG", "AAG", "TTG"]), 3, 3))
