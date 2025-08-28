@@ -1,0 +1,19 @@
+Version,File,Time (s),Memory (MB)
+1,data_size100_amount10.py,1.2041,40.47
+1,data_size100_amount100.py,1.0843,40.24
+1,data_size300_amount10.py,13.7643,50.62
+1,data_size300_amount100.py,13.6162,49.76
+1,data_size400_amount10.py,29.8826,57.66
+1,data_size400_amount100.py,30.5047,58.08
+2,data_size100_amount10.py,0.4785,40.76
+2,data_size100_amount100.py,0.4435,40.41
+2,data_size300_amount10.py,5.3716,50.63
+2,data_size300_amount100.py,5.0089,49.77
+2,data_size400_amount10.py,12.9639,57.63
+2,data_size400_amount100.py,12.2287,58.06
+3,data_size100_amount10.py,0.3533,40.57
+3,data_size100_amount100.py,0.3617,40.29
+3,data_size300_amount10.py,1.5321,50.57
+3,data_size300_amount100.py,1.5555,49.89
+3,data_size400_amount10.py,2.6021,57.80
+3,data_size400_amount100.py,2.6283,57.93

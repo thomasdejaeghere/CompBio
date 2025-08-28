@@ -1,3 +1,24 @@
+"""This module implements profile Hidden Markov Model (HMM) sequence alignment for biological sequences.
+It provides functionality to build a profile HMM from a multiple sequence alignment, apply pseudocounts
+for smoothing probabilities, and perform sequence alignment using an adapted Viterbi algorithm. The module
+is designed to work with sequences in FASTA format and arbitrary alphabets (e.g., 'ACGT').
+
+As optimizations for this module:
+    - Dict-get() calls are replaced with regular lookups
+    - Log-probabilities are precomputed to avoid repeated log calculations.
+    - Transition masks reduce the number of iterations in the dynamic programming loop.
+
+Functions:
+    parse_state(state: str) -> Tuple[str, int]
+    check_transition(s1: str, s2: str, end_idx: int) -> bool
+    get_all_states(num_match_states: int) -> List[str]
+    get_probabilities(counts: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]
+    apply_pseudocounts(transitions_probs, emissions_probs, sigma, states, alphabet)
+    profile_HMM_pseudocounts(theta, sigma, alphabet, patterns)
+    propagate_silent(V, back, col, t_matrix)
+    profile_HMM_sequence_alignment(Text, theta, sigma, alphabet, Alignment)
+"""
+
 import argparse
 import math
 import sys
@@ -6,6 +27,8 @@ from typing import Dict, List, Optional, Tuple
 from Bio import SeqIO
 
 MIN_FLOAT = -sys.float_info.max
+
+# --- Versie 1 ---
 
 
 def parse_state(state: str) -> Tuple[str, int]:
@@ -32,7 +55,8 @@ def parse_state(state: str) -> Tuple[str, int]:
     return state[0], int(state[1:])
 
 
-def is_transition_valid(s1: str, s2: str, end_idx: int) -> bool:
+# @lru_cache(maxsize=None), Memoization here unnecessarily uses more memory without an execution time speedup
+def check_transition(s1: str, s2: str, end_idx: int) -> bool:
     """Checks if a transition from s1 to s2 is valid in the HMM.
 
     Args:
@@ -44,9 +68,9 @@ def is_transition_valid(s1: str, s2: str, end_idx: int) -> bool:
         True if the transition is valid, False otherwise.
 
     Example:
-        >>> is_transition_valid('S', 'M1', 3)
+        >>> check_transition('S', 'M1', 3)
         True
-        >>> is_transition_valid('M1', 'E', 3)
+        >>> check_transition('M1', 'E', 3)
         False
     """
     t1: str
@@ -67,7 +91,7 @@ def is_transition_valid(s1: str, s2: str, end_idx: int) -> bool:
         "I": {("M", i1 + 1), ("D", i1 + 1), ("I", i1)},
         "D": {("M", i1 + 1), ("D", i1 + 1), ("I", i1)},
     }
-    return (t2, i2) in rules.get(t1, set())
+    return (t2, i2) in rules[t1]
 
 
 def round_matrix(matrix: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
@@ -105,8 +129,6 @@ def get_probabilities(
         {'A': {'B': 0.5, 'C': 0.5}}
     """
     result: Dict[str, Dict[str, float]] = {}
-    key: str
-    value: Dict[str, float]
     for key, value in counts.items():
         total: float = sum(value.values())
         result[key] = {
@@ -122,7 +144,7 @@ def get_all_states(num_match_states: int) -> List[str]:
     Args:
         num_match_states: The number of match states.
 
-    Returns:
+    Returns:d
         A list of all state names.
 
     Example:
@@ -130,7 +152,6 @@ def get_all_states(num_match_states: int) -> List[str]:
         ['S', 'I0', 'M1', 'D1', 'I1', 'M2', 'D2', 'I2', 'E']
     """
     states: List[str] = ["S", "I0"]
-    i: int
     for i in range(1, num_match_states + 1):
         states.extend([f"M{i}", f"D{i}", f"I{i}"])
     states.append("E")
@@ -157,15 +178,14 @@ def apply_pseudocounts(
         The transition and emission matrices with pseudocounts applied.
 
     Example:
-        >>> transitions_probs = {'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}}
-        >>> emissions_probs = {'M1': {'A': 1.0, 'C': 0.0}}
+        >>> transitions_probs = {'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}, 'I0': {}, 'E': {}}
+        >>> emissions_probs = {'M1': {'A': 1.0, 'C': 0.0}, 'I0': {'A': 0.0, 'C': 0.0}}
         >>> apply_pseudocounts(transitions_probs, emissions_probs, 1.0, ['S', 'M1', 'I0', 'E'], 'AC')
-        ({'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}}, {'M1': {'A': 0.6666666667, 'C': 0.3333333333}})
+        ({'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}, 'I0': {}, 'E': {}}, {'M1': {'A': 0.6666666666666666, 'C': 0.3333333333333333}, 'I0': {'A': 0.5, 'C': 0.5}})
     """
     transition_matrix: Dict[str, Dict[str, float]] = {}
     emission_matrix: Dict[str, Dict[str, float]] = {}
 
-    s: str
     for s in states:
         valid_targets: List[str] = list(transitions_probs[s].keys())
         values: List[float] = [transitions_probs[s].get(t, 0.0) for t in valid_targets]
@@ -174,7 +194,6 @@ def apply_pseudocounts(
             t: (transitions_probs[s].get(t, 0.0) + sigma) / total for t in valid_targets
         }
 
-    key: str
     for key in emissions_probs.keys():
         values = [emissions_probs[key][a] for a in alphabet]
         total = sum(values) + sigma * len(alphabet)
@@ -229,14 +248,13 @@ def profile_HMM_pseudocounts(
     states: List[str] = get_all_states(num_match_states)
 
     transition_counts: Dict[str, Dict[str, float]] = {
-        s: {t: 0.0 for t in states if is_transition_valid(s, t, num_match_states)}
+        s: {t: 0.0 for t in states if check_transition(s, t, num_match_states)}
         for s in states
     }
     emission_counts: Dict[str, Dict[str, float]] = {
         s: {a: 0.0 for a in alphabet} for s in states if s[0] in ("M", "I")
     }
 
-    pattern: str
     for pattern in patterns:
         state_path: List[str] = ["S"]
         emission_path: List[Tuple[str, str]] = []
@@ -254,12 +272,9 @@ def profile_HMM_pseudocounts(
                 emission_path.append((f"I{match_ptr - 1}", symbol))
         state_path.append("E")
 
-        s1: str
-        s2: str
         for s1, s2 in zip(state_path, state_path[1:]):
             transition_counts[s1][s2] += 1.0
-        state: str
-        symbol: str
+
         for state, symbol in emission_path:
             emission_counts[state][symbol] += 1.0
 
@@ -297,24 +312,6 @@ def log_prob(p: float) -> float:
     return math.log(p) if p > 0 else MIN_FLOAT
 
 
-def is_emitting_state(s: str) -> bool:
-    """Checks if a state is an emitting state (M or I).
-
-    Args:
-        s: The state string.
-
-    Returns:
-        True if the state is emitting, False otherwise.
-
-    Example:
-        >>> is_emitting_state('M1')
-        True
-        >>> is_emitting_state('D1')
-        False
-    """
-    return s[0] in ("M", "I")
-
-
 def propagate_silent(
     V: Dict[str, List[float]],
     back: Dict[str, List[Optional[str]]],
@@ -343,12 +340,9 @@ def propagate_silent(
     changed: bool = True
     while changed:
         changed = False
-        prev: str
         for prev in V:
-            s: str
-            trans_prob: float
             for s, trans_prob in t_matrix.get(prev, {}).items():
-                if not is_emitting_state(s) and trans_prob != 0.0:
+                if s[0] not in ("M", "I") and trans_prob != 0.0:
                     prob: float = V[prev][col] + log_prob(trans_prob)
                     if prob > V[s][col]:
                         V[s][col] = prob
@@ -370,7 +364,7 @@ def backtrack_path(back: Dict[str, List[Optional[str]]], s: str, n: int) -> List
 
     Example:
         >>> back = {"M1": [None, "S"], "S": [None, None]}
-        >>> backtrack_path(back, "M1", "A", 1)
+        >>> backtrack_path(back, "M1", 1)
         ['M1']
     """
     path: List[str] = []
@@ -383,7 +377,7 @@ def backtrack_path(back: Dict[str, List[Optional[str]]], s: str, n: int) -> List
         prev: Optional[str] = back[state][col]
         if prev is None:
             break
-        if is_emitting_state(state):
+        if state[0] in ("M", "I"):
             col -= 1
         state = prev
 
@@ -392,7 +386,7 @@ def backtrack_path(back: Dict[str, List[Optional[str]]], s: str, n: int) -> List
 
 # To improve the maintainability and readability of the code i disabled these warnings
 # pylint: disable=too-many-branches, too-many-locals
-def profile_HMM_sequence_alignment(
+def profile_HMM_sequence_alignment_v1(
     Text: str, theta: float, sigma: float, alphabet: str, Alignment: List[str] | str
 ) -> List[str]:
     """Aligns a sequence to a profile HMM using an adapted Viterbi algorithm.
@@ -422,7 +416,6 @@ def profile_HMM_sequence_alignment(
     t_matrix, e_matrix, L = profile_HMM_pseudocounts(theta, sigma, alphabet, Alignment)
 
     states: List[str] = ["S", "I0"]
-    i: int
     for i in range(1, L + 1):
         states.extend([f"M{i}", f"D{i}", f"I{i}"])
     states.append("E")
@@ -434,12 +427,10 @@ def profile_HMM_sequence_alignment(
 
     propagate_silent(V, back, 0, t_matrix)
 
-    i: int
     for i in range(1, n + 1):
         obs: str = Text[i - 1]
-        s: str
         for s in states:
-            if not is_emitting_state(s):
+            if s[0] not in ("M", "I"):
                 continue
             best_val: float = MIN_FLOAT
             best_prev: Optional[str] = None
@@ -447,10 +438,9 @@ def profile_HMM_sequence_alignment(
             if emit_prob == 0.0:
                 continue
             emit_log: float = log_prob(emit_prob)
-            prev: str
             for prev in states:
                 if s in t_matrix.get(prev, {}):
-                    prev_col: int = i - 1 if is_emitting_state(s) else i
+                    prev_col: int = i - 1 if s[0] in ("M", "I") else i
                     prob: float = (
                         V[prev][prev_col] + log_prob(t_matrix[prev][s]) + emit_log
                     )
@@ -464,7 +454,6 @@ def profile_HMM_sequence_alignment(
 
     best_score: float = MIN_FLOAT
     best_final: Optional[str] = None
-    s: str
     for s in states:
         if "E" in t_matrix.get(s, {}):
             prob: float = V[s][n] + log_prob(t_matrix[s]["E"])
@@ -475,7 +464,468 @@ def profile_HMM_sequence_alignment(
     return backtrack_path(back, str(best_final), n)
 
 
+# --- Versie 2 ---
+
+
+def apply_pseudocounts_v2(
+    transitions_probs: Dict[str, Dict[str, float]],
+    emissions_probs: Dict[str, Dict[str, float]],
+    sigma: float,
+    states: List[str],
+    alphabet: str,
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]]]:
+    """Applies pseudocounts to transition and emission probability matrices.
+    CHANGELOG:
+        - Replaced Dict.get() statements with regular lookups
+
+    Example:
+        >>> transitions_probs = {'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}, 'I0': {}, 'E': {}}
+        >>> emissions_probs = {'M1': {'A': 1.0, 'C': 0.0}, 'I0': {'A': 0.0, 'C': 0.0}}
+        >>> apply_pseudocounts_v2(transitions_probs, emissions_probs, 1.0, ['S', 'M1', 'I0', 'E'], 'AC')
+        ({'S': {'M1': 0.5, 'I0': 0.5}, 'M1': {'E': 1.0}, 'I0': {}, 'E': {}}, {'M1': {'A': 0.6666666666666666, 'C': 0.3333333333333333}, 'I0': {'A': 0.5, 'C': 0.5}})
+    """
+    transition_matrix: Dict[str, Dict[str, float]] = {}
+    emission_matrix: Dict[str, Dict[str, float]] = {}
+
+    for s in states:
+        valid_targets: List[str] = list(transitions_probs[s].keys())
+        values: List[float] = [transitions_probs[s][t] for t in valid_targets]
+        total: float = sum(values) + sigma * len(valid_targets)
+        transition_matrix[s] = {
+            t: (transitions_probs[s][t] + sigma) / total for t in valid_targets
+        }
+
+    for key in emissions_probs.keys():
+        values = [emissions_probs[key][a] for a in alphabet]
+        total = sum(values) + sigma * len(alphabet)
+        emission_matrix[key] = {
+            a: (emissions_probs[key][a] + sigma) / total for a in alphabet
+        }
+
+    return transition_matrix, emission_matrix
+
+
+# To improve the maintainability and readability of the code i disabled these warnings
+# pylint: disable=too-many-branches, too-many-locals
+def profile_HMM_pseudocounts_v2(
+    threshold: float, sigma: float, alphabet: str, patterns: List[str]
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], int]:
+    """Builds a profile HMM with pseudocounts from a multiple sequence alignment.
+    CHANGELOG:
+        -Changed function apply_pseudocounts to use second version
+
+    Example:
+        >>> t, e, n = profile_HMM_pseudocounts_v2(0.5, 1.0, 'AC', ['A-', 'CA'])
+        >>> sorted(t.keys())
+        ['D1', 'E', 'I0', 'I1', 'M1', 'S']
+        >>> sorted(e.keys())
+        ['I0', 'I1', 'M1']
+        >>> n
+        1
+    """
+    n: int = len(patterns)
+    pattern_length: int = len(patterns[0])
+
+    match_columns: List[bool] = []
+    for i in range(pattern_length):
+        gap_count: int = 0
+        for pattern in patterns:
+            if pattern[i] == "-":
+                gap_count += 1
+        match_columns.append(gap_count / n < threshold)
+
+    match_idx: List[int] = [i for i, is_match in enumerate(match_columns) if is_match]
+    num_match_states: int = len(match_idx)
+
+    states: List[str] = get_all_states(num_match_states)
+
+    transition_counts: Dict[str, Dict[str, float]] = {
+        s: {t: 0.0 for t in states if check_transition(s, t, num_match_states)}
+        for s in states
+    }
+    emission_counts: Dict[str, Dict[str, float]] = {
+        s: {a: 0.0 for a in alphabet} for s in states if s[0] in ("M", "I")
+    }
+
+    for pattern in patterns:
+        state_path: List[str] = ["S"]
+        emission_path: List[Tuple[str, str]] = []
+        match_ptr: int = 1
+        for i, symbol in enumerate(pattern):
+            if match_columns[i]:
+                if symbol == "-":
+                    state_path.append(f"D{match_ptr}")
+                else:
+                    state_path.append(f"M{match_ptr}")
+                    emission_path.append((f"M{match_ptr}", symbol))
+                match_ptr += 1
+            elif symbol != "-":
+                state_path.append(f"I{match_ptr - 1}")
+                emission_path.append((f"I{match_ptr - 1}", symbol))
+        state_path.append("E")
+
+        for s1, s2 in zip(state_path, state_path[1:]):
+            transition_counts[s1][s2] += 1.0
+
+        for state, symbol in emission_path:
+            emission_counts[state][symbol] += 1.0
+
+    transitions_probs: Dict[str, Dict[str, float]] = get_probabilities(
+        transition_counts
+    )
+    emissions_probs: Dict[str, Dict[str, float]] = get_probabilities(emission_counts)
+
+    transition_matrix, emission_matrix = apply_pseudocounts_v2(
+        transitions_probs, emissions_probs, sigma, states, alphabet
+    )
+
+    return (
+        round_matrix(transition_matrix),
+        round_matrix(emission_matrix),
+        num_match_states,
+    )
+
+
+def propagate_silent_v2(
+    V: Dict[str, List[float]],
+    back: Dict[str, List[Optional[str]]],
+    col: int,
+    t_matrix: Dict[str, Dict[str, float]],
+) -> None:
+    """CHANGELOG:
+        - Replaced Dict.get() statements with regular lookups
+
+    Example:
+        >>> V = {'S': [0, -1e308], 'D1': [-1e308, -1e308]}
+        >>> back = {'S': [None, None], 'D1': [None, None]}
+        >>> t_matrix = {'S': {'D1': 1.0}, 'D1': {}}
+        >>> propagate_silent_v2(V, back, 0, t_matrix)
+        >>> V['D1'][0] > -1e308
+        False
+    """
+    changed: bool = True
+    while changed:
+        changed = False
+        for prev in V:
+            for s, trans_prob in t_matrix[prev].items():
+                if not s[0] not in ("M", "I") and trans_prob != 0.0:
+                    prob: float = V[prev][col] + log_prob(trans_prob)
+                    if prob > V[s][col]:
+                        V[s][col] = prob
+                        back[s][col] = prev
+                        changed = True
+
+
+# To improve the maintainability and readability of the code i disabled these warnings
+# pylint: disable=too-many-branches, too-many-locals
+def profile_HMM_sequence_alignment_v2(
+    Text: str, theta: float, sigma: float, alphabet: str, Alignment: List[str] | str
+) -> List[str]:
+    """CHANGELOG:
+    - Replaced Dict.get() statements with regular lookups
+
+    Example:
+        >>> profile_HMM_sequence_alignment_v2('C', 0.2, 0.01, 'ABC', ['B---B', 'CAACC', 'CC-AB', 'B-BCB', 'CBBBB'])
+        ['M1', 'I1', 'M2']
+    """
+    if isinstance(Alignment, str):
+        Alignment = [str(rec.seq) for rec in SeqIO.parse(Alignment, "fasta")]
+
+    t_matrix: Dict[str, Dict[str, float]]
+    e_matrix: Dict[str, Dict[str, float]]
+    L: int
+    t_matrix, e_matrix, L = profile_HMM_pseudocounts_v2(
+        theta, sigma, alphabet, Alignment
+    )
+
+    states: List[str] = ["S", "I0"]
+    for i in range(1, L + 1):
+        states.extend([f"M{i}", f"D{i}", f"I{i}"])
+    states.append("E")
+
+    n: int = len(Text)
+    V: Dict[str, List[float]] = {s: [MIN_FLOAT] * (n + 1) for s in states}
+    back: Dict[str, List[Optional[str]]] = {s: [None] * (n + 1) for s in states}
+    V["S"][0] = 0.0
+
+    propagate_silent_v2(V, back, 0, t_matrix)
+
+    for i in range(1, n + 1):
+        obs: str = Text[i - 1]
+        for s in states:
+            if s[0] not in ("M", "I"):
+                continue
+            best_val: float = MIN_FLOAT
+            best_prev: Optional[str] = None
+            emit_prob: float = e_matrix[s][obs]
+            if emit_prob == 0.0:
+                continue
+            emit_log: float = log_prob(emit_prob)
+            for prev in states:
+                if s in t_matrix[prev]:
+                    prev_col: int = i - 1 if s[0] in ("M", "I") else i
+                    prob: float = (
+                        V[prev][prev_col] + log_prob(t_matrix[prev][s]) + emit_log
+                    )
+                    if prob > best_val:
+                        best_val = prob
+                        best_prev = prev
+            if best_prev is not None:
+                V[s][i] = best_val
+                back[s][i] = best_prev
+        propagate_silent_v2(V, back, i, t_matrix)
+
+    best_score: float = MIN_FLOAT
+    best_final: Optional[str] = None
+    for s in states:
+        if "E" in t_matrix[s]:
+            prob: float = V[s][n] + log_prob(t_matrix[s]["E"])
+            if prob > best_score:
+                best_score = prob
+                best_final = s
+
+    return backtrack_path(back, str(best_final), n)
+
+
+# --- Versie 3 ---
+
+
+def round_matrix_v3(matrix: Dict[str, Dict[str, float]]) -> Dict[str, Dict[str, float]]:
+    """Rounds all positive values in a nested dictionary to 10 decimal places.
+    CHANGELOG:
+        - Precompute log_prob once
+
+    Args:
+        matrix: The nested dictionary to round.
+
+    Returns:
+        A new dictionary with rounded values.
+
+    Example:
+        >>> round_matrix({'A': {'B': 0.12345678901, 'C': 0.0}})
+        {'A': {'B': 0.123456789}}
+    """
+    return {
+        state1: {state2: log_prob(round(v, 10)) for state2, v in row.items() if v > 0}
+        for state1, row in matrix.items()
+    }
+
+
+# To improve the maintainability and readability of the code i disabled these warnings
+# pylint: disable=too-many-branches, too-many-locals
+def profile_HMM_pseudocounts_v3(
+    threshold: float, sigma: float, alphabet: str, patterns: List[str]
+) -> Tuple[Dict[str, Dict[str, float]], Dict[str, Dict[str, float]], int]:
+    """Builds a profile HMM with pseudocounts from a multiple sequence alignment.
+    CHANGELOG:
+        -Changed function apply_pseudocounts to use second version
+        -Changed function round_matrix to use third version
+
+    Args:
+        threshold: Gap threshold for match states.
+        sigma: Pseudocount value for smoothing probabilities.
+        alphabet: The alphabet of allowed symbols.
+        patterns: List of aligned sequences.
+
+    Returns:
+        Tuple of (transition matrix, emission matrix, number of match states).
+
+    Example:
+        >>> t, e, n = profile_HMM_pseudocounts(0.5, 1.0, 'AC', ['A-', 'CA'])
+        >>> sorted(t.keys())
+        ['D1', 'E', 'I0', 'I1', 'M1', 'S']
+        >>> sorted(e.keys())
+        ['I0', 'I1', 'M1']
+        >>> n
+        1
+    """
+    n: int = len(patterns)
+    pattern_length: int = len(patterns[0])
+
+    match_columns: List[bool] = []
+    for i in range(pattern_length):
+        gap_count: int = 0
+        for pattern in patterns:
+            if pattern[i] == "-":
+                gap_count += 1
+        match_columns.append(gap_count / n < threshold)
+
+    match_idx: List[int] = [i for i, is_match in enumerate(match_columns) if is_match]
+    num_match_states: int = len(match_idx)
+
+    states: List[str] = get_all_states(num_match_states)
+
+    transition_counts: Dict[str, Dict[str, float]] = {
+        s: {t: 0.0 for t in states if check_transition(s, t, num_match_states)}
+        for s in states
+    }
+    emission_counts: Dict[str, Dict[str, float]] = {
+        s: {a: 0.0 for a in alphabet} for s in states if s[0] in ("M", "I")
+    }
+
+    for pattern in patterns:
+        state_path: List[str] = ["S"]
+        emission_path: List[Tuple[str, str]] = []
+        match_ptr: int = 1
+        for i, symbol in enumerate(pattern):
+            if match_columns[i]:
+                if symbol == "-":
+                    state_path.append(f"D{match_ptr}")
+                else:
+                    state_path.append(f"M{match_ptr}")
+                    emission_path.append((f"M{match_ptr}", symbol))
+                match_ptr += 1
+            elif symbol != "-":
+                state_path.append(f"I{match_ptr - 1}")
+                emission_path.append((f"I{match_ptr - 1}", symbol))
+        state_path.append("E")
+
+        for s1, s2 in zip(state_path, state_path[1:]):
+            transition_counts[s1][s2] += 1.0
+
+        for state, symbol in emission_path:
+            emission_counts[state][symbol] += 1.0
+
+    transitions_probs: Dict[str, Dict[str, float]] = get_probabilities(
+        transition_counts
+    )
+    emissions_probs: Dict[str, Dict[str, float]] = get_probabilities(emission_counts)
+
+    transition_matrix, emission_matrix = apply_pseudocounts_v2(
+        transitions_probs, emissions_probs, sigma, states, alphabet
+    )
+
+    return (
+        round_matrix_v3(transition_matrix),
+        round_matrix_v3(emission_matrix),
+        num_match_states,
+    )
+
+
+def propagate_silent_v3(
+    V: Dict[str, List[float]],
+    back: Dict[str, List[Optional[str]]],
+    col: int,
+    t_matrix: Dict[str, Dict[str, float]],
+) -> None:
+    """Propagates probabilities through silent states in the same column until convergence.
+    CHANGELOG:
+        - log_prob has already been precomputed so here we changed the function call with a regular lookup
+    Args:
+        V: The dynamic programming matrix.
+        back: The backtracking matrix.
+        col: The current column index.
+        t_matrix: The transition probability matrix.
+
+    Returns:
+        None. Updates V and back in place.
+
+    Example:
+        >>> V = {'S': [0, -1e308], 'D1': [-1e308, -1e308]}
+        >>> back = {'S': [None, None], 'D1': [None, None]}
+        >>> t_matrix = {'S': {'D1': 1.0}, 'D1': {}}
+        >>> propagate_silent(V, back, 0, t_matrix)
+        >>> V['D1'][0] > -1e308
+        True
+    """
+    changed: bool = True
+    while changed:
+        changed = False
+        for prev in V:
+            for s, trans_prob in t_matrix[prev].items():
+                if s[0] not in ("M", "I"):
+                    prob: float = V[prev][col] + trans_prob
+                    if prob > V[s][col]:
+                        V[s][col] = prob
+                        back[s][col] = prev
+                        changed = True
+
+
+# To improve the maintainability and readability of the code i disabled these warnings
+# pylint: disable=too-many-branches, too-many-locals
+def profile_HMM_sequence_alignment(
+    Text: str, theta: float, sigma: float, alphabet: str, Alignment: List[str] | str
+) -> List[str]:
+    """Aligns a sequence to a profile HMM using an adapted Viterbi algorithm.
+    Builds the HMM from a multiple sequence alignment and computes the most probable hidden state path.
+    Handles match, insert, delete, and silent states with dynamic programming and backtracking.
+    CHANGELOG:
+        - log_prob has already been precomputed so here we changed the function call with a regular lookup
+        - Precomputed a transition_mask to reduce the inner for loop in the DP loop
+
+    Args:
+        text: The sequence to align.
+        theta: Threshold for determining match columns.
+        pseudocount: Pseudocount value for smoothing probabilities.
+        alphabet: The alphabet of observation symbols.
+        alignment: List of aligned sequences.
+
+    Returns:
+        The most probable sequence of hidden states for the input sequence.
+
+    Example:
+        >>> profile_HMM_sequence_alignment('C', 0.2, 0.01, 'ABC', ['B---B', 'CAACC', 'CC-AB', 'B-BCB', 'CBBBB'])
+        ['M1', 'D2']
+    """
+    if isinstance(Alignment, str):
+        Alignment = [str(rec.seq) for rec in SeqIO.parse(Alignment, "fasta")]
+
+    t_matrix: Dict[str, Dict[str, float]]
+    e_matrix: Dict[str, Dict[str, float]]
+    L: int
+    t_matrix, e_matrix, L = profile_HMM_pseudocounts_v3(
+        theta, sigma, alphabet, Alignment
+    )
+
+    states: List[str] = ["S", "I0"]
+    for i in range(1, L + 1):
+        states.extend([f"M{i}", f"D{i}", f"I{i}"])
+    states.append("E")
+
+    n: int = len(Text)
+    V: Dict[str, List[float]] = {s: [MIN_FLOAT] * (n + 1) for s in states}
+    back: Dict[str, List[Optional[str]]] = {s: [None] * (n + 1) for s in states}
+    V["S"][0] = 0.0
+    transition_mask: Dict[str, List[str]] = {
+        s: [t for t in states if check_transition(t, s, L)] for s in states
+    }
+
+    propagate_silent_v3(V, back, 0, t_matrix)
+
+    for i in range(1, n + 1):
+        obs: str = Text[i - 1]
+        for s in states:
+            if s[0] in ("M", "I"):
+                best_val: float = MIN_FLOAT
+                best_prev: Optional[str] = None
+                emit_prob: float = e_matrix[s][obs]
+                for prev in transition_mask[s]:
+                    prev_col: int = i - 1 if s[0] in ("M", "I") else i
+                    prob: float = V[prev][prev_col] + t_matrix[prev][s] + emit_prob
+                    if prob > best_val:
+                        best_val = prob
+                        best_prev = prev
+                if best_prev is not None:
+                    V[s][i] = best_val
+                    back[s][i] = best_prev
+        propagate_silent_v3(V, back, i, t_matrix)
+
+    best_score: float = MIN_FLOAT
+    best_final: Optional[str] = None
+    for s in states:
+        if "E" in t_matrix[s]:
+            prob: float = V[s][n] + t_matrix[s]["E"]
+            if prob > best_score:
+                best_score = prob
+                best_final = s
+
+    return backtrack_path(back, str(best_final), n)
+
+
 if __name__ == "__main__":
+    import doctest
+
+    doctest.testmod()
     parser = argparse.ArgumentParser(description="Profile HMM sequence alignment")
     parser.add_argument(
         "--threshold",
